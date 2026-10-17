@@ -1,0 +1,13 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        sanitize: [OFF, ON]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y cmake libssl-dev
+      - run: cmake -B build -DSANITIZE=${{ matrix.sanitize }} && cmake --build build
+      - run: ctest --test-dir build --output-on-failure
