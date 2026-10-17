@@ -11,6 +11,7 @@ It does less, and everything it does builds cleanly with `-Werror` and is covere
 | `erasecure devices` | Lists drives (HDD, SATA SSD, NVMe, USB, SD/eMMC, virtual) and the right Clear/Purge method for each |
 | `erasecure wipe <file\|/dev/X>` | Overwrites the whole target, then reads it back to verify every byte |
 | `erasecure shred <file\|folder>` | Overwrites, renames and deletes files; folders recursively, symlinks never followed |
+| `erasecure image <drive> <out.img>` | Copies a drive or USB stick read-only into an image file, skipping bad sectors, with a SHA-256 hash |
 | `erasecure carve <image> <outdir>` | Recovers JPEG, PNG, GIF, PDF and ZIP (incl. DOCX/XLSX/PPTX) from a raw disk image |
 | `erasecure audit-verify` | Checks the tamper-evident SHA-256 hash-chained audit log |
 
@@ -30,7 +31,8 @@ cmake -B build-asan -DSANITIZE=ON -DCMAKE_BUILD_TYPE=Debug   # optional ASan/UBS
 ./build/erasecure wipe old-backup.img                 # 1 pass of zeros, verified
 ./build/erasecure wipe /dev/sdX --confirm /dev/sdX    # whole drive; refuses if anything on it is mounted
 ./build/erasecure shred ./secrets/
-./build/erasecure carve evidence.dd recovered/
+sudo ./build/erasecure image /dev/sdX evidence.img  # 1. copy the drive (read-only)
+./build/erasecure carve evidence.img recovered/      # 2. recover deleted files from the copy
 ./build/erasecure audit-verify
 ```
 

@@ -22,6 +22,8 @@ static int usage(void)
         "      overwrite the whole target (default: 1 pass of zeros, verified)\n"
         "  erasecure shred <file|folder> [--no-verify]\n"
         "      overwrite, rename and delete files (folders recursively)\n"
+        "  erasecure image <drive|file> <out.img>\n"
+        "      copy a drive read-only into an image (bad sectors zero-filled), with SHA-256\n"
         "  erasecure carve <image> <outdir> [--max-mb N]\n"
         "      recover JPEG/PNG/GIF/PDF/ZIP(+DOCX/XLSX) files from a raw image\n"
         "  erasecure audit-verify\n"
@@ -118,6 +120,20 @@ int main(int argc, char **argv)
         }
         printf("shredded %s (%llu bytes)\n", pos[1], (unsigned long long)st.st_size);
         audit("shred", pos[1], verify ? "ok-verified" : "ok", (uint64_t)st.st_size);
+        return 0;
+    }
+
+    if (!strcmp(cmd, "image") && npos == 3) {
+        ec_image_result r;
+        if (ec_image(pos[1], pos[2], &r)) {
+            fprintf(stderr, "image failed: %s\n", r.err);
+            audit("image", pos[1], r.err, 0);
+            return 1;
+        }
+        printf("imaged %s -> %s: %llu bytes, %llu unreadable sector(s)\nsha256 %s\n",
+               pos[1], pos[2], (unsigned long long)r.bytes,
+               (unsigned long long)r.bad_sectors, r.sha256);
+        audit("image", pos[1], r.sha256, r.bytes);
         return 0;
     }
 

@@ -44,6 +44,15 @@ int ec_audit_append(const char *log, const char *action, const char *target,
                     const char *result, uint64_t bytes);
 int ec_audit_verify(const char *log, long *bad_line);
 
+/* image.c - read-only drive imaging */
+typedef struct {
+    uint64_t bytes, bad_sectors;
+    char sha256[65];
+    char err[EC_ERRLEN];
+} ec_image_result;
+
+int ec_image(const char *src, const char *dst, ec_image_result *r);
+
 /* carve.c - signature-based recovery */
 typedef struct {
     unsigned found;

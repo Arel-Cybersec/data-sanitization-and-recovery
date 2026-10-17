@@ -146,6 +146,14 @@ static void test_carve(void)
         assert(!memcmp(back, parts[i].d, parts[i].n));
     }
     puts("ok carve");
+
+    ec_image_result ir;
+    assert(ec_image(path("disk.img"), path("copy.img"), &ir) == 0);
+    assert(ir.bytes == sizeof img && ir.bad_sectors == 0 && strlen(ir.sha256) == 64);
+    static unsigned char copy[sizeof img];
+    assert(get(path("copy.img"), copy, sizeof copy) == sizeof img && !memcmp(copy, img, sizeof img));
+    assert(ec_image(path("disk.img"), path("copy.img"), &ir) != 0); /* never overwrites */
+    puts("ok image");
 }
 
 int main(void)

@@ -17,7 +17,7 @@ if(SANITIZE)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
-add_library(ec STATIC src/wipe.c src/shred.c src/devices.c src/audit.c src/carve.c)
+add_library(ec STATIC src/wipe.c src/shred.c src/devices.c src/audit.c src/carve.c src/image.c)
 target_link_libraries(ec PUBLIC OpenSSL::Crypto)
 
 add_executable(erasecure src/main.c)
