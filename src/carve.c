@@ -1,21 +1,14 @@
 /* carve.c - signature + structure based file recovery from a raw image.
  * SPDX-License-Identifier: MIT
  *
- * Read-only: the image is mmap'd PROT_READ. Each candidate header is
+ * Read-only: the image is memory-mapped read-only. Each candidate header is
  * validated by walking the format's real structure (JPEG markers, PNG
  * chunks, ZIP end-of-central-directory) rather than just grabbing bytes up
  * to the first footer, which cuts down false positives and truncation.
  * Fragmented files are not reassembled: only contiguous files are recovered. */
-#define _GNU_SOURCE
 #include "erasecure.h"
 
-#include <errno.h>
-#include <fcntl.h>
-#include <stdio.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 enum { T_JPG, T_PNG, T_GIF, T_PDF, T_ZIP, T_N };
 static const char *ext[T_N] = {"jpg", "png", "gif", "pdf", "zip"};
@@ -25,7 +18,14 @@ const char *ec_carve_type_name(int i) { return i >= 0 && i < T_N ? ext[i] : NULL
 static const unsigned char *find(const unsigned char *p, const unsigned char *end,
                                  const char *needle, size_t n)
 {
-    return p < end ? memmem(p, (size_t)(end - p), needle, n) : NULL;
+    /* memmem is not portable to Windows: memchr for the first byte, then compare */
+    while (p < end && (size_t)(end - p) >= n) {
+        p = memchr(p, (unsigned char)needle[0], (size_t)(end - p) - n + 1);
+        if (!p) return NULL;
+        if (!memcmp(p, needle, n)) return p;
+        p++;
+    }
+    return NULL;
 }
 
 static uint32_t be32(const unsigned char *p)
@@ -126,36 +126,24 @@ static int save(const char *dir, uint64_t off, int t, const unsigned char *p, si
 {
     char path[4096];
     snprintf(path, sizeof path, "%s/%012llx.%s", dir, (unsigned long long)off, ext[t]);
-    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0640);
-    if (fd < 0)
+    FILE *f = ec_os_create_excl(path);
+    if (!f)
         return -1;
-    while (n) {
-        ssize_t w = write(fd, p, n);
-        if (w < 0 && errno == EINTR) continue;
-        if (w <= 0) { close(fd); return -1; }
-        p += w; n -= (size_t)w;
-    }
-    return close(fd);
+    int ok = fwrite(p, 1, n, f) == n;
+    return fclose(f) == 0 && ok ? 0 : -1;
 }
 
 int ec_carve(const char *image, const char *outdir, uint64_t max_file,
              ec_carve_stats *st)
 {
     memset(st, 0, sizeof *st);
-    int fd = open(image, O_RDONLY | O_CLOEXEC);
-    struct stat sb;
-    if (fd < 0 || fstat(fd, &sb) || sb.st_size == 0) {
-        if (fd >= 0) close(fd);
+    uint64_t size;
+    void *cookie;
+    const unsigned char *img = ec_os_map(image, &size, &cookie);
+    if (!img)
         return -1;
-    }
-    size_t size = (size_t)sb.st_size;
-    const unsigned char *img = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-    if (img == MAP_FAILED)
-        return -1;
-    madvise((void *)img, size, MADV_SEQUENTIAL);
-    if (mkdir(outdir, 0750) && errno != EEXIST) {
-        munmap((void *)img, size);
+    if (ec_os_mkdir(outdir)) {
+        ec_os_unmap(img, size, cookie);
         return -1;
     }
 
@@ -177,6 +165,6 @@ int ec_carve(const char *image, const char *outdir, uint64_t max_file,
         }
         p += got ? got : 1;
     }
-    munmap((void *)img, size);
+    ec_os_unmap(img, size, cookie);
     return rc;
 }

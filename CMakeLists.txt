@@ -7,7 +7,6 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(OpenSSL 1.1 REQUIRED COMPONENTS Crypto)
 
 add_compile_options(-Wall -Wextra -Werror -Wformat=2 -Wno-format-truncation -Wshadow
                     -fstack-protector-strong -D_FORTIFY_SOURCE=2)
@@ -17,8 +16,18 @@ if(SANITIZE)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
-add_library(ec STATIC src/wipe.c src/shred.c src/devices.c src/audit.c src/carve.c src/image.c)
-target_link_libraries(ec PUBLIC OpenSSL::Crypto)
+add_library(ec STATIC src/wipe.c src/audit.c src/carve.c src/image.c)
+if(WIN32)
+  # Windows: OS-provided CNG crypto, no extra DLLs; static runtime for a single .exe
+  target_sources(ec PRIVATE src/os_windows.c src/crypto_windows.c)
+  target_link_libraries(ec PUBLIC bcrypt shell32)
+  target_compile_definitions(ec PUBLIC WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00 __USE_MINGW_ANSI_STDIO=1)
+  add_link_options(-static)
+else()
+  find_package(OpenSSL 1.1 REQUIRED COMPONENTS Crypto)
+  target_sources(ec PRIVATE src/os_linux.c src/crypto_openssl.c)
+  target_link_libraries(ec PUBLIC OpenSSL::Crypto)
+endif()
 
 add_executable(erasecure src/main.c)
 target_link_libraries(erasecure PRIVATE ec)

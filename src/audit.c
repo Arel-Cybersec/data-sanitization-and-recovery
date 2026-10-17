@@ -6,38 +6,28 @@
  * previous line's hash. Editing, reordering or deleting any line breaks the
  * chain from that point on. Truncating the *tail* is only detectable if you
  * keep the latest hash somewhere else (e.g. print it in the report). */
-#define _GNU_SOURCE
 #include "erasecure.h"
 
-#include <openssl/evp.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/file.h>
 #include <time.h>
-#include <unistd.h>
 
 #define GENESIS "0000000000000000000000000000000000000000000000000000000000000000"
+#define MAXLINE 65536
 
-static void sha256_hex(const char *s, size_t n, char out[65])
+/* Append s to out as a JSON string; out has room for 6*strlen(s)+3. */
+static char *json_str(char *out, const char *s)
 {
-    unsigned char md[32];
-    unsigned len = 0;
-    EVP_Digest(s, n, md, &len, EVP_sha256(), NULL);
-    for (int i = 0; i < 32; i++)
-        sprintf(out + 2 * i, "%02x", md[i]);
-}
-
-static void json_str(FILE *f, const char *s)
-{
-    fputc('"', f);
+    *out++ = '"';
     for (; *s; s++) {
         unsigned char c = (unsigned char)*s;
-        if (c == '"' || c == '\\') fprintf(f, "\\%c", c);
-        else if (c < 0x20) fprintf(f, "\\u%04x", c);
-        else fputc(c, f);
+        if (c == '"' || c == '\\') { *out++ = '\\'; *out++ = (char)c; }
+        else if (c < 0x20) out += sprintf(out, "\\u%04x", c);
+        else *out++ = (char)c;
     }
-    fputc('"', f);
+    *out++ = '"';
+    *out = 0;
+    return out;
 }
 
 /* Pull a 64-hex field value out of a line. */
@@ -57,71 +47,66 @@ static int field_hex(const char *line, const char *key, char out[65])
 int ec_audit_append(const char *log, const char *action, const char *target,
                     const char *result, uint64_t bytes)
 {
-    FILE *f = fopen(log, "a+");
-    if (!f)
-        return -1;
-    flock(fileno(f), LOCK_EX);
+    size_t room = 512 + 6 * (strlen(action) + strlen(target) + strlen(result));
+    char *line = malloc(MAXLINE), *body = malloc(room);
+    FILE *f = ec_os_fopen(log, "a+b");
+    int rc = -1;
+    if (!line || !body || !f || room > MAXLINE)
+        goto out;
+    ec_os_lock(f);
 
-    char prev[65] = GENESIS, *line = NULL;
-    size_t cap = 0;
+    char prev[65] = GENESIS;
     long seq = 0;
     rewind(f);
-    while (getline(&line, &cap, f) > 0) {
+    while (fgets(line, MAXLINE, f))
         if (field_hex(line, ",\"hash\":\"", prev) == 0)
             seq++;
-    }
-    free(line);
 
     char ts[32];
     time_t now = time(NULL);
     strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
 
-    char *body = NULL;
-    size_t blen = 0;
-    FILE *m = open_memstream(&body, &blen);
-    if (!m) {
-        fclose(f);
-        return -1;
-    }
-    fprintf(m, "{\"seq\":%ld,\"time\":\"%s\",\"tool\":\"erasecure " EC_VERSION "\",\"action\":",
-            seq + 1, ts);
-    json_str(m, action);
-    fputs(",\"target\":", m);
-    json_str(m, target);
-    fputs(",\"result\":", m);
-    json_str(m, result);
-    fprintf(m, ",\"bytes\":%llu,\"prev\":\"%s\"", (unsigned long long)bytes, prev);
-    fclose(m);
+    char *p = body + sprintf(body, "{\"seq\":%ld,\"time\":\"%s\",\"tool\":\"erasecure "
+                             EC_VERSION "\",\"action\":", seq + 1, ts);
+    p = json_str(p, action);
+    p += sprintf(p, ",\"target\":");
+    p = json_str(p, target);
+    p += sprintf(p, ",\"result\":");
+    p = json_str(p, result);
+    p += sprintf(p, ",\"bytes\":%llu,\"prev\":\"%s\"", (unsigned long long)bytes, prev);
 
     char h[65];
-    sha256_hex(body, blen, h);
+    if (ec_sha256_hex(body, (size_t)(p - body), h))
+        goto out;
     fseek(f, 0, SEEK_END);
-    int rc = fprintf(f, "%s,\"hash\":\"%s\"}\n", body, h) < 0 || fflush(f) ? -1 : 0;
-    fsync(fileno(f));
+    if (fprintf(f, "%s,\"hash\":\"%s\"}\n", body, h) > 0 && ec_os_fsync(f) == 0)
+        rc = 0;
+out:
+    if (f) fclose(f);
+    free(line);
     free(body);
-    fclose(f);
     return rc;
 }
 
 int ec_audit_verify(const char *log, long *bad_line)
 {
-    FILE *f = fopen(log, "r");
-    if (!f)
+    FILE *f = ec_os_fopen(log, "rb");
+    char *line = malloc(MAXLINE);
+    if (!f || !line) {
+        if (f) fclose(f);
+        free(line);
         return -1;
-    char expect_prev[65] = GENESIS, prev[65], h[65], calc[65], *line = NULL;
-    size_t cap = 0;
+    }
+    char expect_prev[65] = GENESIS, prev[65], h[65], calc[65];
     long n = 0;
     int rc = 0;
-    while (getline(&line, &cap, f) > 0) {
+    while (fgets(line, MAXLINE, f)) {
         n++;
         char *hp = strstr(line, ",\"hash\":\"");
         if (!hp || field_hex(line, ",\"prev\":\"", prev) ||
-            field_hex(hp, ",\"hash\":\"", h)) {
-            rc = 1;
-            break;
-        }
-        sha256_hex(line, (size_t)(hp - line), calc);
-        if (strcmp(prev, expect_prev) || strcmp(calc, h)) {
+            field_hex(hp, ",\"hash\":\"", h) ||
+            ec_sha256_hex(line, (size_t)(hp - line), calc) ||
+            strcmp(prev, expect_prev) || strcmp(calc, h)) {
             rc = 1;
             break;
         }

@@ -1,12 +1,16 @@
 /* main.c - EraseCure 2 command line.
  * SPDX-License-Identifier: MIT */
-#define _GNU_SOURCE
 #include "erasecure.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
+#ifdef _WIN32
+#include <windows.h>
+#define DRIVE "\\\\.\\PhysicalDriveN"
+#else
+#define DRIVE "/dev/sdX"
+#endif
 
 static const char *audit_log = "erasecure-audit.jsonl";
 
@@ -17,8 +21,8 @@ static int usage(void)
         "usage:\n"
         "  erasecure devices\n"
         "      list drives with a NIST SP 800-88 Rev. 2 method recommendation\n"
-        "  erasecure wipe <file|/dev/X> [--random] [--passes N] [--no-verify]\n"
-        "                 [--confirm /dev/X]\n"
+        "  erasecure wipe <file|" DRIVE "> [--random] [--passes N] [--no-verify]\n"
+        "                 [--confirm " DRIVE "]\n"
         "      overwrite the whole target (default: 1 pass of zeros, verified)\n"
         "  erasecure shred <file|folder> [--no-verify]\n"
         "      overwrite, rename and delete files (folders recursively)\n"
@@ -42,6 +46,12 @@ static void audit(const char *action, const char *target, const char *res,
 
 int main(int argc, char **argv)
 {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8); /* we print UTF-8 */
+    char **u8 = ec_os_utf8_args(&argc);
+    if (u8)
+        argv = u8;
+#endif
     const char *pos[3] = {0}, *confirm = NULL;
     int npos = 0, verify = 1, passes = 1;
     enum ec_pattern pat = EC_ZERO;
@@ -65,7 +75,7 @@ int main(int argc, char **argv)
     const char *cmd = pos[0];
 
     if (!strcmp(cmd, "devices") && npos == 1)
-        return ec_list_devices() ? 1 : 0;
+        return ec_os_list_devices() ? 1 : 0;
 
     if (!strcmp(cmd, "wipe") && npos == 2) {
         if (passes < 1 || passes > 35) {
@@ -86,8 +96,7 @@ int main(int argc, char **argv)
                (unsigned long long)r.bytes, r.passes,
                pat == EC_RANDOM ? "random" : "zeros",
                r.verified ? "verified" : "NOT verified");
-        struct stat st;
-        if (stat(pos[1], &st) == 0 && S_ISBLK(st.st_mode))
+        if (r.is_device)
             puts("reminder: on SSD/flash an overwrite is Clear, not Purge "
                  "(spare/remapped blocks are unreachable). See `erasecure devices`.");
         audit("wipe", pos[1], r.verified ? "ok-verified" : "ok", r.bytes);
@@ -98,12 +107,12 @@ int main(int argc, char **argv)
         const char *w = ec_fs_warning(pos[1]);
         if (w)
             fprintf(stderr, "warning: %s\n", w);
-        struct stat st;
-        if (lstat(pos[1], &st)) {
+        int isdir = ec_os_is_dir(pos[1]);
+        if (isdir < 0) {
             perror(pos[1]);
             return 1;
         }
-        if (S_ISDIR(st.st_mode)) {
+        if (isdir) {
             ec_shred_stats s;
             int rc = ec_shred_tree(pos[1], verify, &s);
             printf("shredded %u file(s), %llu bytes; removed %u folder(s), "
@@ -113,13 +122,14 @@ int main(int argc, char **argv)
             return rc ? 1 : 0;
         }
         char err[EC_ERRLEN];
-        if (ec_shred_file(pos[1], verify, err)) {
+        uint64_t bytes;
+        if (ec_shred_file(pos[1], verify, &bytes, err)) {
             fprintf(stderr, "shred failed: %s\n", err);
             audit("shred", pos[1], err, 0);
             return 1;
         }
-        printf("shredded %s (%llu bytes)\n", pos[1], (unsigned long long)st.st_size);
-        audit("shred", pos[1], verify ? "ok-verified" : "ok", (uint64_t)st.st_size);
+        printf("shredded %s (%llu bytes)\n", pos[1], (unsigned long long)bytes);
+        audit("shred", pos[1], verify ? "ok-verified" : "ok", bytes);
         return 0;
     }
 

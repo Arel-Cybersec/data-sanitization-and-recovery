@@ -5,14 +5,23 @@
 #include "../src/erasecure.h"
 
 #include <assert.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#define exists(p) (GetFileAttributesA(p) != INVALID_FILE_ATTRIBUTES)
+#define hardlink(a, b) (CreateHardLinkA(b, a, NULL) ? 0 : -1)
+#define remove_file(p) DeleteFileA(p)
+#else
 #include <sys/stat.h>
 #include <unistd.h>
+#define exists(p) (access(p, F_OK) == 0)
+#define hardlink(a, b) link(a, b)
+#define remove_file(p) unlink(p)
+#endif
 
-static char dir[] = "/tmp/erasecure-test-XXXXXX";
+static char dir[512];
 
 static char *path(const char *name)
 {
@@ -57,34 +66,44 @@ static void test_wipe(void)
     for (size_t i = 0; i < sizeof back; i++) zeros += back[i] == 0;
     assert(zeros < sizeof back / 100); /* ~1/256 expected */
 
-    assert(ec_wipe_path("/dev/null", EC_ZERO, 1, 0, NULL, &r) != 0);   /* char dev */
     assert(ec_wipe_path(path("missing"), EC_ZERO, 1, 0, NULL, &r) != 0);
+    /* A drive is never opened for writing without --confirm. */
+    assert(ec_wipe_path("\\\\.\\PhysicalDrive0", EC_ZERO, 1, 0, NULL, &r) != 0);
+#ifndef _WIN32
+    assert(ec_wipe_path("/dev/null", EC_ZERO, 1, 0, NULL, &r) != 0);   /* char dev */
     assert(ec_device_is_mounted("no-such-device-xyz") == 0);
+#endif
     puts("ok wipe");
 }
 
 static void test_shred(void)
 {
     char err[EC_ERRLEN];
+    uint64_t sb;
     put(path("s.txt"), "secret secret", 13);
-    assert(ec_shred_file(path("s.txt"), 1, err) == 0);
-    assert(access(path("s.txt"), F_OK) != 0);
+    assert(ec_shred_file(path("s.txt"), 1, &sb, err) == 0);
+    assert(!exists(path("s.txt")) && sb == 13);
 
     put(path("h1"), "x", 1);
-    assert(link(path("h1"), path("h2")) == 0);
-    assert(ec_shred_file(path("h1"), 1, err) != 0); /* hard links refused */
-    unlink(path("h1")); unlink(path("h2"));
+    assert(hardlink(path("h1"), path("h2")) == 0);
+    assert(ec_shred_file(path("h1"), 1, &sb, err) != 0); /* hard links refused */
+    remove_file(path("h1")); remove_file(path("h2"));
 
-    mkdir(path("tree"), 0700);
-    mkdir(path("tree/sub"), 0700);
+    assert(ec_os_mkdir(path("tree")) == 0);
+    assert(ec_os_mkdir(path("tree/sub")) == 0);
     put(path("tree/a"), "aaaa", 4);
     put(path("tree/sub/b"), "", 0);
     put(path("outside"), "keep", 4);
+#ifdef _WIN32
+    unsigned links = 0; /* symlinks need admin/developer mode on Windows */
+#else
+    unsigned links = 1;
     assert(symlink(path("outside"), path("tree/link")) == 0);
+#endif
     ec_shred_stats st;
     assert(ec_shred_tree(path("tree"), 1, &st) == 0);
-    assert(st.files == 2 && st.dirs == 2 && st.links == 1 && st.bytes == 4);
-    assert(access(path("tree"), F_OK) != 0);
+    assert(st.files == 2 && st.dirs == 2 && st.links == links && st.bytes == 4);
+    assert(!exists(path("tree")));
     unsigned char b[8];
     assert(get(path("outside"), b, sizeof b) == 4 && !memcmp(b, "keep", 4));
     puts("ok shred");
@@ -101,7 +120,9 @@ static void test_audit(void)
 
     unsigned char buf[4096];
     size_t n = get(log, buf, sizeof buf);
-    unsigned char *p = memmem(buf, n, "\"bytes\":20", 10);
+    unsigned char *p = NULL;
+    for (size_t i = 0; i + 10 <= n && !p; i++)
+        if (!memcmp(buf + i, "\"bytes\":20", 10)) p = buf + i;
     assert(p);
     p[9] = '1'; /* 20 -> 21 */
     put(log, buf, n);
@@ -158,19 +179,26 @@ static void test_carve(void)
 
 int main(void)
 {
+#ifdef _WIN32
+    char tmp[MAX_PATH];
+    assert(GetTempPathA(sizeof tmp, tmp));
+    snprintf(dir, sizeof dir, "%serasecure-test-%lu", tmp, (unsigned long)GetCurrentProcessId());
+    assert(ec_os_mkdir(dir) == 0);
+#else
+    snprintf(dir, sizeof dir, "/tmp/erasecure-test-XXXXXX");
     assert(mkdtemp(dir));
     assert(!strcmp(ec_classify("nvme0n1", 0, 0), "NVMe SSD"));
     assert(!strcmp(ec_classify("sda", 1, 0), "HDD"));
     assert(!strcmp(ec_classify("sdb", 0, 1), "USB flash/SSD"));
     assert(!strcmp(ec_classify("mmcblk0", 0, 0), "SD/eMMC"));
     assert(!strcmp(ec_classify("vda", 1, 0), "Virtual disk"));
+#endif
     test_wipe();
     test_shred();
     test_audit();
     test_carve();
-    char cmd[600];
-    snprintf(cmd, sizeof cmd, "rm -rf %s", dir);
-    assert(system(cmd) == 0);
+    ec_shred_stats st; /* clean up with our own folder shredder */
+    assert(ec_shred_tree(dir, 0, &st) == 0 && !exists(dir));
     puts("all tests passed");
     return 0;
 }
