@@ -72,7 +72,7 @@ if you keep the last hash elsewhere.
 
 ## Building the Windows .exe yourself
 
-GitHub Actions builds and tests it on every push; tagging `v*` publishes it to Releases. To build locally, use
+GitHub Actions builds and tests it on every push, and publishes it to Releases whenever `EC_VERSION` in `src/erasecure.h` changes. To build locally, use
 MSYS2 UCRT64 (`pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake`), then `cmake -B build && cmake --build build`.
 
 ## What changed from the original
