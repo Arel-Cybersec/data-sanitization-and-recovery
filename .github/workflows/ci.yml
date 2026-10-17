@@ -59,4 +59,4 @@ jobs:
           sha256sum erasecure.exe > erasecure.exe.sha256
           gh release create "$V" erasecure.exe erasecure.exe.sha256 --target "${{ github.sha }}" \
             --repo "${{ github.repository }}" --title "EraseCure $V" \
-            --notes "Windows: download erasecure.exe and run it from PowerShell. Check the download with: Get-FileHash erasecure.exe (compare with erasecure.exe.sha256)."
+            --notes "Windows: download erasecure.exe and double-click it to open the app, or run it from PowerShell. Check the download with: Get-FileHash erasecure.exe (compare with erasecure.exe.sha256)."

@@ -100,7 +100,7 @@ MSYS2 UCRT64 (`pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake`)
   own purge command instead: `nvme sanitize`, ATA Secure Erase, or the cloud provider's crypto-erase.
 - **Structure-aware carving.** Walks JPEG markers, PNG chunks and ZIP end-of-central-directory records instead of
   cutting at the first footer, so thumbnails embedded in JPEGs don't truncate the photo.
-- **Smaller.** About 2,100 lines for both platforms including tests, instead of about 12,000, with no SQLite dependency.
+- **Smaller.** About 2,500 lines for both platforms and the Windows app including tests, instead of about 12,000, with no SQLite dependency.
 
 ## Know the limits (read before trusting it with real data)
 
