@@ -29,7 +29,14 @@ else()
   target_link_libraries(ec PUBLIC OpenSSL::Crypto)
 endif()
 
-add_executable(erasecure src/main.c)
+if(WIN32)
+  # gui_windows.c: desktop window; the .rc embeds a manifest for modern
+  # controls and sharp text on high-DPI screens.
+  add_executable(erasecure src/main.c src/gui_windows.c src/windows/erasecure.rc)
+  target_link_libraries(erasecure PRIVATE comdlg32 ole32 user32 gdi32 advapi32)
+else()
+  add_executable(erasecure src/main.c)
+endif()
 target_link_libraries(erasecure PRIVATE ec)
 
 enable_testing()

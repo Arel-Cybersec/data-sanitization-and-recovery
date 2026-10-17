@@ -15,12 +15,22 @@ It does less, and everything it does builds cleanly with `-Werror` and is covere
 | `erasecure carve <image> <outdir>` | Recovers JPEG, PNG, GIF, PDF and ZIP (incl. DOCX/XLSX/PPTX) from a raw disk image |
 | `erasecure audit-verify` | Checks the tamper-evident SHA-256 hash-chained audit log |
 
+## Windows app
+
+Download `erasecure.exe` from the [Releases page](https://github.com/Arel-Cybersec/data-sanitization-and-recovery/releases/latest)
+and **double-click it**. It is a single file with nothing to install, and it uses only Windows' built-in crypto (CNG).
+Windows SmartScreen may warn because the file is new and unsigned; you can check it is the exact file GitHub built
+with `Get-FileHash .\erasecure.exe`, compared against `erasecure.exe.sha256`.
+
+![EraseCure on Windows](docs/app-windows.png)
+
+Each button asks for confirmation before erasing anything (the default answer is **No**) and shows the result in the
+panel. For drive actions (Copy drive to image, Wipe drive), click **Restart as Administrator**, then type the
+drive name from **List drives** into the Drive box.
+
 ## Windows (PowerShell)
 
-1. Download `erasecure.exe` from the [Releases page](https://github.com/Arel-Cybersec/data-sanitization-and-recovery/releases/latest).
-   It is a single file with nothing to install; it uses only Windows' built-in crypto (CNG).
-2. Optionally, check the download matches the published hash: `Get-FileHash .\erasecure.exe` and compare it with `erasecure.exe.sha256`.
-3. Open PowerShell in the download folder and run:
+The same `erasecure.exe` also works from PowerShell:
 
 ```powershell
 .\erasecure.exe devices                       # list drives + how to erase each (no admin needed)

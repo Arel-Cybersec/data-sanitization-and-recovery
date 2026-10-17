@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define EC_VERSION "2.1.0"
+#define EC_VERSION "2.2.0"
 #define EC_ERRLEN 256
 
 enum ec_pattern { EC_ZERO = 0, EC_RANDOM = 1 };
@@ -109,6 +109,7 @@ const char *ec_carve_type_name(int i);
 
 #ifdef _WIN32
 char **ec_os_utf8_args(int *argc); /* the command line as UTF-8 */
+int ec_gui_run(void);              /* gui_windows.c: the desktop window */
 #endif
 #ifdef __linux__
 int ec_device_is_mounted(const char *devname);

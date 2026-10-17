@@ -19,6 +19,10 @@ static int usage(void)
     fputs(
         "EraseCure " EC_VERSION " - data sanitization and recovery\n\n"
         "usage:\n"
+#ifdef _WIN32
+        "  erasecure gui            (or double-click erasecure.exe)\n"
+        "      open the desktop window\n"
+#endif
         "  erasecure devices\n"
         "      list drives with a NIST SP 800-88 Rev. 2 method recommendation\n"
         "  erasecure wipe <file|" DRIVE "> [--random] [--passes N] [--no-verify]\n"
@@ -51,6 +55,15 @@ int main(int argc, char **argv)
     char **u8 = ec_os_utf8_args(&argc);
     if (u8)
         argv = u8;
+    setvbuf(stdout, NULL, _IONBF, 0); /* stream live into the app window */
+    /* Double-clicked in Explorer (we are alone in our console), or `erasecure gui`:
+     * open the window instead of printing usage into a console that vanishes. */
+    DWORD procs[2];
+    if ((argc == 1 && GetConsoleProcessList(procs, 2) == 1) ||
+        (argc == 2 && !strcmp(argv[1], "gui"))) {
+        FreeConsole();
+        return ec_gui_run();
+    }
 #endif
     const char *pos[3] = {0}, *confirm = NULL;
     int npos = 0, verify = 1, passes = 1;
